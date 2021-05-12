@@ -5,6 +5,10 @@ from hoshino.service import sucmd
 from hoshino.typing import CommandSession, CQHttpError
 from hoshino.service import Service
 
+lock = asyncio.Lock()
+broadcast_record = []
+
+
 #格式：bc/广播 服务名 广播内容
 @sucmd('broadcast', aliases=('bc', '广播'))
 async def broadcast(session: CommandSession):
@@ -30,7 +34,9 @@ async def broadcast(session: CommandSession):
         for g in gl:
             await asyncio.sleep(0.5)
             try:
-                await session.bot.send_group_msg(self_id=sid, group_id=g, message=bc_msg)
+                msg_obj = await session.bot.send_group_msg(self_id=sid, group_id=g, message=bc_msg)
+                with await lock:
+                    broadcast_record.append(msg_obj['message_id'])
                 hoshino.logger.info(f'群{g} 投递广播成功')
             except Exception as e:
                 hoshino.logger.error(f'群{g} 投递广播失败：{type(e)}')
@@ -39,3 +45,24 @@ async def broadcast(session: CommandSession):
                 except Exception as e:
                     hoshino.logger.critical(f'向广播发起者进行错误回报时发生错误：{type(e)}')
     await session.send(f'广播完成！')
+    await asyncio.sleep(120)
+    with await lock:
+        broadcast_record.clear()
+
+@sucmd('broadcast_recall', aliases=('bc_recall', '广播撤回'))
+async def broadcast_recall(session: CommandSession):
+    with await lock:
+        if len(broadcast_record) == 0:
+            await session.send(f'无可以撤回的广播')
+            return
+        for msg_id in broadcast_record:
+            try:
+                await session.bot.delete_msg(message_id=msg_id)
+            except Exception as e:
+                hoshino.logger.error(f'消息{msg_id} 撤回失败：{type(e)}')
+                try:
+                    await session.send(f'消息{msg_id} 撤回失败：{type(e)}')
+                except Exception as e:
+                    hoshino.logger.critical(f'向广播发起者进行错误回报时发生错误：{type(e)}')
+        broadcast_record.clear()
+    await session.send(f'广播撤回完成！')
